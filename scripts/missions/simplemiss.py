@@ -11,8 +11,7 @@ Navigate to GPS coordinates, land without disarming, and return to launch
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
-from geometry_msgs.msg import PoseStamped, TwistStamped
-from geographic_msgs.msg import GeoPoseStamped
+from geometry_msgs.msg import PoseStamped
 from sensor_msgs.msg import NavSatFix
 from mavros_msgs.msg import HomePosition, GlobalPositionTarget
 from mavros_msgs.msg import State
@@ -32,8 +31,6 @@ class GPSLandRTL(Node):
         )
         
         # Publishers
-        self.vel_pub = self.create_publisher(TwistStamped, "/mavros/setpoint_velocity/cmd_vel", 10)
-        self.global_setpoint_pub = self.create_publisher(GeoPoseStamped, "/mavros/setpoint_position/global", 10)
         self.raw_global_pub = self.create_publisher(GlobalPositionTarget, '/mavros/setpoint_raw/global', 10)
 
 
@@ -54,26 +51,15 @@ class GPSLandRTL(Node):
         self.takeoff_client.wait_for_service(timeout_sec=10.0)
         print("Services ready!\n")
         
-        # Parameters
-        self.kp = 0.05
-        self.max_vel = 1.0
-        self.required_stable_time = 2.0 
-        self.descend_speed = -0.1     # m/s
-        self.ascend_speed  =  0.4     # m/s
-        self.z_hold_speed  =  0.0
-
         # Mission Parameters
         self.target_latitude = lat
         self.target_longitude = lon
         self.rtl_altitude = 4.0
         
         # State variables
-        self.centered_start_time = None
-        self.landing_phase = False 
         self.final_land_triggered = False
         self.current_state = State()
         self.current_pose = PoseStamped()
-        self.prev_time = None
         self.mission_complete = False
         self.rtl_initiated = False
         self.home_position= None
@@ -251,6 +237,7 @@ class GPSLandRTL(Node):
         if not self.arm():
             return
         time.sleep(2)
+        relative_target_height = self.current_pose.pose.position.z + self.rtl_altitude
 
         print("Waiting for home position...")
         while self.home_position is None and rclpy.ok():
@@ -264,7 +251,7 @@ class GPSLandRTL(Node):
         if not self.takeoff(self.rtl_altitude):
             return
         
-        self.wait_for_altitude(self.rtl_altitude)
+        self.wait_for_altitude(relative_target_height)
         time.sleep(1)
         print()
         
@@ -299,6 +286,7 @@ class GPSLandRTL(Node):
         if not self.set_mode("GUIDED"):
             return
         time.sleep(1)
+        relative_target_height = self.current_pose.pose.position.z + self.rtl_altitude
         print()
         print("ARM throttle")
         if not self.arm():
@@ -308,10 +296,10 @@ class GPSLandRTL(Node):
         
         
         print(f"[9] Takeoff to {self.rtl_altitude}m")
-        if not self.takeoff(self.rtl_altitude):
+        if not self.takeoff(relative_target_height):
             return
         
-        self.wait_for_altitude(self.rtl_altitude)
+        self.wait_for_altitude(relative_target_height)
         time.sleep(1)
         print()
 
@@ -338,7 +326,7 @@ class GPSLandRTL(Node):
         if self.set_mode("LAND"):
             self.rtl_initiated = True
             self.mission_complete = True
-            self.get_logger().info("Land activated - Returning to launch point")
+            self.get_logger().info("Land activated at launch point")
 
         print()
         print(f"Mission duration: {((time.time() - start_time)/60.0):.2f} minutes")
